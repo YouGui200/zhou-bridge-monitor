@@ -1,11 +1,11 @@
 """
 ================================================================================
-州桥结构健康监测系统 - 云端部署版
+州桥结构健康监测系统 - 云端部署版 (Enhanced)
 ================================================================================
-适配说明：
-1. 路径修改为当前目录（适配 Streamlit Cloud 扁平化部署）
-2. 算法库直接 import（假设 preprocessing_lib.py 在同级目录）
-3. 数据文件直接读取（假设 csv 在同级目录）
+更新说明：
+1. 新增：手动数据输入 (Manual Input)
+2. 优化：数据预览移除 Timestamp，显示具体传感器通道名称
+3. 路径：保持当前目录适配
 ================================================================================
 """
 
@@ -17,11 +17,12 @@ from plotly.subplots import make_subplots
 import sys
 import os
 import time
+import io
 from datetime import datetime
 import traceback
 
 # =============================================================================
-# 1. 核心配置与路径系统 (部署版特供)
+# 1. 核心配置与路径系统
 # =============================================================================
 
 st.set_page_config(
@@ -31,16 +32,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ----------------- 关键修改点开始 -----------------
 # 获取当前脚本所在的文件夹路径
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# 告诉 Python：在当前文件夹里找 preprocessing_lib.py
 sys.path.append(CURRENT_DIR)
-
-# 告诉代码：数据文件就在当前文件夹里
 DATA_PATH = CURRENT_DIR
-# ----------------- 关键修改点结束 -----------------
 
 try:
     from preprocessing_lib import (
@@ -49,9 +44,9 @@ try:
     ALGO_STATUS = True
 except ImportError:
     ALGO_STATUS = False
-    st.error("⚠️ 警告：找不到算法库文件 preprocessing_lib.py，请确保它已上传。")
+    # 静默处理或在侧边栏提示，不阻断主流程
 
-# 传感器配置 (文件名保持不变，路径已指向当前目录)
+# 传感器配置
 SENSORS = {
     'strain': {'name': '应变传感器', 'icon': '🔴', 'color': '#e74c3c', 'file': 'raw_data_strain.csv', 'unit': 'με', 'desc': '监测拱顶/拱脚受力'},
     'accel': {'name': '加速度传感器', 'icon': '🔵', 'color': '#3498db', 'file': 'raw_data_acceleration.csv', 'unit': 'm/s²', 'desc': '监测桥面振动'},
@@ -60,7 +55,7 @@ SENSORS = {
 }
 
 # =============================================================================
-# 2. 视觉样式 (保持不变)
+# 2. 视觉样式
 # =============================================================================
 
 def apply_style():
@@ -102,8 +97,19 @@ def load_csv_data(path):
 
 def plot_paper_chart(df, col, color, title):
     fig = go.Figure()
-    step = max(1, len(df) // 5000)
-    fig.add_trace(go.Scattergl(x=df.index[::step], y=df[col][::step], mode='lines', line=dict(color=color, width=1)))
+    # 智能降采样：如果数据量过大，进行降采样以提高绘图速度
+    step = max(1, len(df) // 5000) 
+    
+    # 尝试寻找时间轴，如果没有则用索引
+    time_col = None
+    for c in df.columns:
+        if 'time' in c.lower() or 'date' in c.lower():
+            time_col = c
+            break
+            
+    x_data = df[time_col][::step] if time_col else df.index[::step]
+    
+    fig.add_trace(go.Scattergl(x=x_data, y=df[col][::step], mode='lines', line=dict(color=color, width=1)))
     fig.update_layout(title=title, height=300, margin=dict(l=40,r=20,t=30,b=30), plot_bgcolor='white', 
                      xaxis=dict(showgrid=True, gridcolor='#eee', showline=True, mirror=True),
                      yaxis=dict(showgrid=True, gridcolor='#eee', showline=True, mirror=True))
@@ -155,7 +161,8 @@ def page_home():
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("传感器", "4 类")
     c2.metric("监测点", "8 个")
-    c3.metric("算法处理", "就绪", "Ready")
+    status_text = "就绪" if ALGO_STATUS else "受限"
+    c3.metric("算法库", status_text, "Available" if ALGO_STATUS else "Missing")
     total = sum([len(v['data']) if v['data'] is not None else 0 for v in st.session_state.data_map.values()])
     c4.metric("数据量", f"{total:,}")
     st.markdown("---")
@@ -172,59 +179,78 @@ def page_data():
     s = SENSORS[st.session_state.sensor]
     store = get_current_data()
     st.title(f"📊 数据管理 - {s['name']}")
+    
     c1, c2 = st.columns([1, 2])
+    
     with c1:
-        st.markdown("### 📥 数据操作")
-        if st.button("🚀 加载演示数据", type="primary", use_container_width=True):
-            # [新] 加载进度条
-            bar = st.progress(0, text="连接数据库... 0%")
-            time.sleep(0.2)
+        st.markdown("### 📥 数据来源")
+        
+        # 使用 Tabs 区分不同的输入方式
+        tab_auto, tab_manual = st.tabs(["📂 文件 / 演示", "✍️ 手动输入"])
+        
+        with tab_auto:
+            # 1. 演示数据按钮
+            if st.button("🚀 加载演示数据", type="primary", use_container_width=True):
+                path = os.path.join(DATA_PATH, s['file'])
+                if os.path.exists(path):
+                    with st.spinner("读取数据中..."):
+                        df = load_csv_data(path)
+                        set_current_data(data=df, processed=None)
+                        st.toast(f"成功加载 {len(df)} 行数据", icon="✅")
+                        time.sleep(0.5)
+                        st.rerun()
+                else:
+                    st.error(f"在服务器上未找到文件: {s['file']}")
+
+            st.markdown("---")
             
-            bar.progress(30, text="寻找数据文件... 30%")
-            
-            # 使用部署版路径配置
-            path = os.path.join(DATA_PATH, s['file'])
-            time.sleep(0.2)
-            
-            if os.path.exists(path):
-                bar.progress(60, text="读取CSV内容... 60%")
-                df = load_csv_data(path)
-                
-                bar.progress(90, text="解析时间序列... 90%")
-                set_current_data(data=df, processed=None)
-                
-                bar.progress(100, text="加载完成 100%")
-                time.sleep(0.5)
-                bar.empty()
-                
-                st.toast(f"成功加载 {len(df)} 行数据", icon="✅")
-                time.sleep(0.5)
-                st.rerun()
-            else:
-                bar.empty()
-                st.error(f"文件未找到: {s['file']}")
-                
-        uploaded = st.file_uploader("上传 CSV", type=['csv'])
-        if uploaded:
-            with st.spinner("解析文件..."):
+            # 2. 文件上传
+            uploaded = st.file_uploader("上传 CSV 文件", type=['csv'])
+            if uploaded:
                 try:
                     df = pd.read_csv(uploaded)
                     set_current_data(data=df)
-                    st.toast("上传成功", icon="✅")
-                    st.success("上传成功")
+                    st.success(f"上传成功: {uploaded.name}")
                 except Exception as e:
                     st.error(f"解析失败: {e}")
+
+        with tab_manual:
+            st.info("请直接粘贴 CSV 格式的文本数据 (包含表头)")
+            # 3. 手动输入
+            manual_text = st.text_area("粘贴数据区域", height=200, placeholder="timestamp,strain_S-01\n2023-01-01,10.5\n2023-01-02,11.2...")
+            if st.button("解析文本数据", use_container_width=True):
+                if manual_text.strip():
+                    try:
+                        df = pd.read_csv(io.StringIO(manual_text))
+                        set_current_data(data=df)
+                        st.toast("文本解析成功", icon="✅")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"格式错误: {e}")
+                else:
+                    st.warning("内容为空")
+
     with c2:
         if store['data'] is not None:
             df = store['data']
             st.markdown("### 📈 数据预览")
             st.dataframe(df.head(50), use_container_width=True, height=200)
-            num = df.select_dtypes(include=[np.number]).columns
-            if len(num) > 0:
-                col = st.selectbox("预览列", num)
+            
+            # --- 关键修改：过滤列并显示所有传感器 ---
+            # 1. 获取所有列名
+            all_cols = df.columns.tolist()
+            # 2. 过滤掉包含 'time', 'date', 'timestamp' 的列 (不区分大小写)
+            sensor_cols = [c for c in all_cols if 'time' not in c.lower() and 'date' not in c.lower() and 'timestamp' not in c.lower()]
+            
+            if len(sensor_cols) > 0:
+                # 3. 让用户选择具体的传感器通道 (例如 strain_S-01_micro)
+                col = st.selectbox("选择传感器通道 (预览)", sensor_cols)
+                # 4. 绘图
                 st.plotly_chart(plot_paper_chart(df, col, s['color'], col), use_container_width=True)
+            else:
+                st.warning("未找到有效的传感器数据列 (非时间列)")
         else:
-            st.info("👈 请先加载数据")
+            st.info("👈 请在左侧选择数据加载方式")
 
 def page_process():
     s = SENSORS[st.session_state.sensor]
@@ -234,10 +260,20 @@ def page_process():
         st.warning("⚠️ 请先加载数据")
         return
     df = store['data']
-    num = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    # 同样过滤掉时间列，供算法选择
+    all_cols = df.columns.tolist()
+    sensor_cols = [c for c in all_cols if 'time' not in c.lower() and 'date' not in c.lower()]
+    # 确保只要是数值型且不在排除列表中
+    num = [c for c in sensor_cols if pd.api.types.is_numeric_dtype(df[c])]
+
     c1, c2 = st.columns([1, 2.5])
     with c1:
         st.markdown("### ⚙️ 算法配置")
+        if not num:
+            st.error("数据中没有数值列可处理")
+            return
+            
         target = st.selectbox("1. 目标列", num)
         st.markdown("---")
         fill = st.selectbox("2. 缺失值", ['spline', 'linear', 'polynomial'])
@@ -250,7 +286,6 @@ def page_process():
         
         if st.button("🚀 开始处理", type="primary", use_container_width=True):
             bar = st.progress(0, text="初始化 0%")
-            status_area = st.empty()
             
             try:
                 raw = df[target].values.astype(float)
@@ -343,7 +378,7 @@ def page_export():
         st.download_button("📥 下载 CSV", csv, f"Result_{s_info['name']}.csv", "text/csv", type="primary")
     with c2:
         st.markdown("### 📄 下载实验报告")
-        rpt = f"""州桥结构健康监测报告\n时间: {datetime.now()}\n传感器: {s_info['name']}\n异常点: {res['stats']['idx']}\nSNR: {res['stats']['snr']:.2f} dB\n结论: 正常。"""
+        rpt = f"""州桥结构健康监测报告\n时间: {datetime.now()}\n传感器: {s_info['name']}\n通道: {res.get('col', 'N/A')}\n异常点: {res['stats']['idx']}\nSNR: {res['stats']['snr']:.2f} dB\n结论: 正常。"""
         st.text_area("预览", rpt, height=150)
         st.download_button("📥 下载 TXT", rpt, "Report.txt")
 
