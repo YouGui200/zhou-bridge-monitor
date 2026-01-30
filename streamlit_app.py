@@ -1,11 +1,14 @@
 """
 ================================================================================
-州桥结构健康监测系统 - 云端部署版 (Final Release)
+州桥结构健康监测系统 - 云端部署版 (Final Fixed)
 ================================================================================
-适配说明：
-1. 传感器配置：应变(4)、加速度(2)、温度(1)、位移(1)
-2. 数据输入：支持服务器文件读取 & 手动粘贴 CSV
-3. 列识别：自动剔除 Timestamp，显示所有传感器通道 (如 S-01 ~ S-04)
+更新内容：
+1. 界面优化：下拉框标题更简洁，去除多余提示文字。
+2. 逻辑确认：根据 CSV 列名自动识别并列出所有传感器通道。
+   - 应变: 显示 S-01 ~ S-04
+   - 加速度: 显示 A-01 ~ A-02
+   - 温度: 显示 T-01
+   - 位移: 显示 D-01
 ================================================================================
 """
 
@@ -47,45 +50,45 @@ except ImportError:
     ALGO_STATUS = False
 
 # -----------------------------------------------------------------------------
-# 传感器配置 (根据你的要求严格定义)
+# 传感器配置
 # -----------------------------------------------------------------------------
 SENSORS = {
     'strain': {
         'name': '应变传感器', 
         'icon': '🔴', 
-        'color': '#F44336', # 对应算法文件的红色
+        'color': '#F44336', 
         'file': 'raw_data_strain.csv', 
         'unit': 'με', 
-        'desc': '监测拱顶/拱脚受力 (通道: S-01 ~ S-04)'
+        'desc': '监测拱顶/拱脚受力 (4通道: S-01~S-04)'
     },
     'accel': {
         'name': '加速度传感器', 
         'icon': '🔵', 
-        'color': '#2196F3', # 对应算法文件的蓝色
+        'color': '#2196F3', 
         'file': 'raw_data_acceleration.csv', 
         'unit': 'm/s²', 
-        'desc': '监测桥面振动 (通道: A-01 ~ A-02)'
+        'desc': '监测桥面振动 (2通道: A-01~A-02)'
     },
     'temp': {
         'name': '温度传感器', 
         'icon': '🟢', 
-        'color': '#4CAF50', # 对应算法文件的绿色
+        'color': '#4CAF50', 
         'file': 'raw_data_temperature.csv', 
         'unit': '°C', 
-        'desc': '监测环境温度 (通道: T-01)'
+        'desc': '监测环境温度 (1通道: T-01)'
     },
     'disp': {
         'name': '位移传感器', 
         'icon': '🟣', 
-        'color': '#9C27B0', # 对应算法文件的紫色
+        'color': '#9C27B0', 
         'file': 'raw_data_displacement.csv', 
         'unit': 'mm', 
-        'desc': '监测桥墩沉降 (通道: D-01)'
+        'desc': '监测桥墩沉降 (1通道: D-01)'
     }
 }
 
 # =============================================================================
-# 2. 核心逻辑工具函数
+# 2. 核心工具函数
 # =============================================================================
 
 def apply_style():
@@ -101,8 +104,8 @@ def apply_style():
 
 def get_sensor_columns(df):
     """
-    智能获取传感器数据列
-    排除 time, date, timestamp, unnamed 等无关列
+    获取传感器数据列：
+    自动过滤 time/date/timestamp/index/id 等无关列
     """
     if df is None: return []
     
@@ -110,7 +113,7 @@ def get_sensor_columns(df):
     df.columns = df.columns.str.strip()
     
     cols = df.columns.tolist()
-    # 排除列表
+    # 排除关键词
     exclude_keywords = ['time', 'date', 'timestamp', 'unnamed', 'id', 'index']
     
     sensor_cols = []
@@ -119,7 +122,7 @@ def get_sensor_columns(df):
         if not any(k in c_lower for k in exclude_keywords):
             sensor_cols.append(c)
             
-    # 排序，确保 S-01, S-02, S-03... 顺序排列
+    # 字母顺序排序 (S-01, S-02...)
     sensor_cols.sort()
     return sensor_cols
 
@@ -148,7 +151,7 @@ def load_csv_data(path):
 
 def plot_paper_chart(df, col, color, title):
     fig = go.Figure()
-    step = max(1, len(df) // 5000) # 降采样防止卡顿
+    step = max(1, len(df) // 5000) # 智能降采样
     
     # 尝试找时间轴
     time_col = None
@@ -203,7 +206,7 @@ def render_sidebar():
             st.rerun()
             
         cur = SENSORS[key]
-        st.info(f"**配置:** {cur['desc']}\n\n**单位:** {cur['unit']}")
+        st.info(f"**类型:** {cur['name']}\n**单位:** {cur['unit']}")
         st.markdown("---")
         st.caption("MODULES")
         nav = {'home': '🏠 系统概览', 'data': '📊 数据管理', 'process': '⚡ 智能处理', 'export': '📥 成果导出'}
@@ -214,16 +217,16 @@ def page_home():
     st.title("🏠 系统概览")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("传感器类型", "4 类")
-    c2.metric("监测通道总数", "8 个", help="应变4 + 加速度2 + 温度1 + 位移1")
+    c2.metric("监测通道", "8 个", help="Strain(4) + Accel(2) + Temp(1) + Disp(1)")
     
     algo_text = "正常" if ALGO_STATUS else "未检测到库"
-    c3.metric("算法引擎状态", algo_text, delta="Online" if ALGO_STATUS else "Offline")
+    c3.metric("算法引擎", algo_text, delta="Ready" if ALGO_STATUS else "Error")
     
     total = sum([len(v['data']) if v['data'] is not None else 0 for v in st.session_state.data_map.values()])
-    c4.metric("当前缓存数据量", f"{total:,} 行")
+    c4.metric("总数据行数", f"{total:,}")
     
     st.markdown("---")
-    st.caption("传感器节点状态监控")
+    st.caption("各传感器节点状态")
     
     cols = st.columns(4)
     for i, (k, s) in enumerate(SENSORS.items()):
@@ -236,7 +239,7 @@ def page_home():
             <div class="card" style="border-top-color:{s['color']}; text-align:center;">
                 <h1 style="font-size: 3em; margin: 0;">{s['icon']}</h1>
                 <h4 style="margin: 10px 0;">{s['name']}</h4>
-                <p style="font-size: 0.9em; color: #666;">{s['desc']}</p>
+                <p style="font-size: 0.85em; color: #666; height: 40px;">{s['desc']}</p>
                 <p style="color:{status_color}; font-weight: bold;">● {status_text}</p>
             </div>
             """, unsafe_allow_html=True)
@@ -251,40 +254,37 @@ def page_data():
     with c1:
         st.markdown("### 📥 数据加载")
         
-        tab_auto, tab_manual = st.tabs(["📂 服务器/文件", "✍️ 手动输入"])
+        tab_auto, tab_manual = st.tabs(["📂 文件 / 演示", "✍️ 手动输入"])
         
         with tab_auto:
-            # 1. 演示数据加载
-            st.caption(f"默认文件: {s['file']}")
-            if st.button("🚀 加载默认文件", type="primary", use_container_width=True):
+            st.caption(f"默认读取: {s['file']}")
+            if st.button("🚀 加载演示数据", type="primary", use_container_width=True):
                 path = os.path.join(DATA_PATH, s['file'])
                 if os.path.exists(path):
-                    with st.spinner("读取CSV中..."):
+                    with st.spinner("读取中..."):
                         df = load_csv_data(path)
                         set_current_data(data=df, processed=None)
-                        st.success(f"成功加载 {len(df)} 行数据")
+                        st.success(f"已加载 {len(df)} 行数据")
                         time.sleep(0.5)
                         st.rerun()
                 else:
                     st.error(f"未找到文件: {s['file']}")
 
             st.markdown("---")
-            # 2. 本地上传
-            uploaded = st.file_uploader("上传本地 CSV", type=['csv'])
+            uploaded = st.file_uploader("上传 CSV 文件", type=['csv'])
             if uploaded:
                 try:
                     df = pd.read_csv(uploaded)
                     set_current_data(data=df)
-                    st.success(f"上传成功: {uploaded.name}")
+                    st.success(f"上传成功")
                     st.rerun()
                 except Exception as e:
                     st.error(f"解析失败: {e}")
 
         with tab_manual:
-            # 3. 手动输入
-            st.info("请粘贴 CSV 格式文本 (需包含表头，用逗号分隔)")
+            st.info("请粘贴 CSV 文本 (需包含表头，逗号分隔)")
             example = "timestamp, strain_S-01, strain_S-02\n2023-01-01, 10.5, 11.2\n2023-01-02, 10.8, 11.5"
-            manual_text = st.text_area("数据粘贴区", height=200, placeholder=example)
+            manual_text = st.text_area("数据输入区", height=200, placeholder=example)
             
             if st.button("解析文本数据", use_container_width=True):
                 if manual_text.strip():
@@ -296,7 +296,7 @@ def page_data():
                     except Exception as e:
                         st.error(f"格式错误: {e}")
                 else:
-                    st.warning("输入内容为空")
+                    st.warning("输入为空")
 
     with c2:
         if store['data'] is not None:
@@ -304,22 +304,20 @@ def page_data():
             st.markdown("### 📈 数据预览")
             st.dataframe(df.head(10), use_container_width=True)
             
-            # --- 关键修改：获取所有传感器列 ---
-            # 这里的 sensor_cols 会自动包含如 strain_S-01, strain_S-02, strain_S-03, strain_S-04
+            # --- 核心修改点：获取传感器列 ---
             sensor_cols = get_sensor_columns(df)
             
             if len(sensor_cols) > 0:
-                st.caption(f"检测到 {len(sensor_cols)} 个传感器通道: {', '.join(sensor_cols)}")
-                # 下拉框：如果CSV里有4列，这里就会显示4个选项
-                col = st.selectbox("选择传感器通道进行绘图 (已自动剔除时间列)", sensor_cols)
+                # 修改点：去除提示文字，直接显示“选择传感器通道”
+                col = st.selectbox("选择传感器通道", sensor_cols)
                 
                 if col:
                     try:
                         st.plotly_chart(plot_paper_chart(df, col, s['color'], s['name']), use_container_width=True)
                     except Exception as e:
-                        st.error(f"绘图失败: {e}")
+                        st.error(f"无法绘图: {e}")
             else:
-                st.warning("未检测到有效的数值列 (可能全是时间列或格式不正确)")
+                st.warning("未检测到有效的数据列")
         else:
             st.info("👈 请先从左侧加载数据")
 
@@ -332,53 +330,49 @@ def page_process():
         return
     
     df = store['data']
-    # 同样使用智能列识别
     sensor_cols = get_sensor_columns(df)
 
     c1, c2 = st.columns([1, 2.5])
     with c1:
-        st.markdown("### ⚙️ 算法参数配置")
+        st.markdown("### ⚙️ 算法配置")
         if not sensor_cols:
             st.error("没有可处理的数据列")
             return
-            
-        target = st.selectbox("1. 选择处理通道", sensor_cols)
+        
+        # 修改点：保持一致性，简洁显示
+        target = st.selectbox("1. 目标通道", sensor_cols)
         st.markdown("---")
-        fill = st.selectbox("2. 缺失值填充", ['spline', 'linear', 'polynomial', 'nearest'])
+        fill = st.selectbox("2. 缺失值处理", ['spline', 'linear', 'polynomial', 'nearest'])
         anom = st.selectbox("3. 异常检测", ['sigma', 'iqr', 'mad', 'isolation_forest'])
         
-        # 阈值动态调整
         if anom == 'sigma': thresh = st.slider("阈值 (n_sigma)", 1.0, 5.0, 3.0)
         elif anom == 'iqr': thresh = st.slider("阈值 (k)", 1.0, 3.0, 1.5)
         else: thresh = st.slider("阈值 (threshold)", 2.0, 5.0, 3.5)
         
-        filt = st.selectbox("4. 滤波去噪", ['wavelet', 'moving_average', 'gaussian', 'savgol'])
+        filt = st.selectbox("4. 滤波算法", ['wavelet', 'moving_average', 'gaussian', 'savgol'])
         st.markdown("---")
         
-        if st.button("🚀 运行预处理流水线", type="primary", use_container_width=True):
+        if st.button("🚀 运行处理", type="primary", use_container_width=True):
             if not ALGO_STATUS:
-                st.error("找不到 preprocessing_lib.py，无法运行算法")
+                st.error("找不到 preprocessing_lib.py")
                 return
 
-            bar = st.progress(0, text="初始化算法引擎...")
+            bar = st.progress(0, text="初始化...")
             
             try:
-                # 准备数据：转为 numeric，处理非数字字符
+                # 预处理：转数值
                 raw = pd.to_numeric(df[target], errors='coerce').values
                 
-                # 步骤 1
-                bar.progress(30, text=f"Step 1: 缺失值处理 ({fill})...")
+                # Step 1
+                bar.progress(30, text=f"填补缺失值 ({fill})...")
                 time.sleep(0.2)
-                
                 h = MissingValueHandler()
                 s1 = h.fill_missing(raw, fill)
                 
-                # 步骤 2
-                bar.progress(60, text=f"Step 2: 异常检测 ({anom})...")
+                # Step 2
+                bar.progress(60, text=f"检测异常值 ({anom})...")
                 time.sleep(0.2)
-                
                 d = AnomalyDetector()
-                # 构造参数
                 kw = {}
                 if anom == 'sigma': kw['n_sigma'] = thresh
                 elif anom == 'iqr': kw['k'] = thresh
@@ -387,15 +381,14 @@ def page_process():
                 _, idx = d.detect_anomalies(s1, anom, **kw)
                 s2 = d.replace_anomalies(s1, anom, 'interpolation', **kw)
                 
-                # 步骤 3
-                bar.progress(85, text=f"Step 3: 滤波去噪 ({filt})...")
+                # Step 3
+                bar.progress(85, text=f"信号降噪 ({filt})...")
                 time.sleep(0.2)
-                
                 f = NoiseFilter()
                 s3 = f.filter_signal(s2, filt)
                 snr = PerformanceMetrics.calculate_snr(s2, s3)
                 
-                bar.progress(100, text="处理完成")
+                bar.progress(100, text="完成")
                 time.sleep(0.5)
                 bar.empty()
                 
@@ -406,31 +399,30 @@ def page_process():
                     'original': raw
                 }
                 set_current_data(processed=s3, meta=meta)
-                st.toast("算法执行成功", icon="✅")
+                st.toast("处理成功", icon="✅")
                 
             except Exception as e:
-                st.error(f"运算错误: {e}")
+                st.error(f"运行出错: {e}")
                 st.code(traceback.format_exc())
 
     with c2:
         if store['processed'] is not None:
             res = store['meta']
-            # 校验当前显示的图表是否对应选中的列
             if res.get('col') != target:
-                st.warning(f"⚠️ 当前显示的是旧结果 ({res.get('col')})，请点击'运行'以更新为 {target}")
+                st.warning(f"⚠️ 显示结果为通道 {res.get('col')}，请重新运行以更新")
             
             proc = store['processed']
             orig = res['original']
             
-            st.markdown("### 📈 处理结果分析")
+            st.markdown("### 📈 结果分析")
             k1, k2, k3 = st.columns(3)
-            k1.metric("修复异常点", f"{res['stats']['idx']} 个", delta="Anomaly")
+            k1.metric("异常点数", f"{res['stats']['idx']}", delta="Detected")
             k2.metric("信噪比 (SNR)", f"{res['stats']['snr']:.2f} dB", delta="Quality")
             k3.metric("当前通道", target)
             
             st.plotly_chart(plot_comparison(orig, proc, s['color'], target), use_container_width=True)
         else:
-            st.info("👈 请在左侧配置参数并运行算法")
+            st.info("👈 请在左侧配置并运行")
 
 def page_export():
     s_info = SENSORS[st.session_state.sensor]
@@ -446,43 +438,33 @@ def page_export():
     
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("### 💾 导出 CSV 数据")
+        st.markdown("### 💾 导出 CSV")
         df_out = pd.DataFrame({
             f'Original_{col_name}': res['original'], 
             f'Processed_{col_name}': proc
         })
         csv = df_out.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
-            label="📥 下载处理结果 (CSV)",
+            label="📥 下载数据 (CSV)",
             data=csv,
             file_name=f"Processed_{col_name}.csv",
             mime="text/csv",
             type="primary"
         )
     with c2:
-        st.markdown("### 📄 导出技术报告")
-        rpt = f"""========================================
-州桥结构健康监测 - 算法处理报告
-========================================
-生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-传感器类型: {s_info['name']}
-监测通道: {col_name}
-----------------------------------------
-[1. 算法配置]
-- 缺失值填充算法: {res['params']['fill']}
-- 异常检测算法: {res['params']['anom']} (阈值={res['params'].get('th', 'N/A')})
-- 滤波去噪算法: {res['params']['filt']}
-
-[2. 统计结果]
-- 识别并修复异常点: {res['stats']['idx']} 个
-- 信号信噪比 (SNR): {res['stats']['snr']:.2f} dB
-----------------------------------------
-结论: 
-该通道数据已完成清洗，消除了离群点并抑制了环境噪声。
-建议将处理后的数据用于后续的结构模态分析。
+        st.markdown("### 📄 导出报告")
+        rpt = f"""州桥结构健康监测报告
+-----------------------
+时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+传感器: {s_info['name']}
+通道: {col_name}
+参数: {res['params']}
+异常点: {res['stats']['idx']}
+SNR提升: {res['stats']['snr']:.2f} dB
+结论: 数据预处理完毕，质量符合要求。
 """
-        st.text_area("报告预览", rpt, height=200)
-        st.download_button("📥 下载分析报告 (TXT)", rpt, f"Report_{col_name}.txt")
+        st.text_area("预览", rpt, height=200)
+        st.download_button("📥 下载报告 (TXT)", rpt, f"Report_{col_name}.txt")
 
 def main():
     apply_style()
